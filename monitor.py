@@ -1,3 +1,4 @@
+
 import feedparser
 import os
 import smtplib
@@ -5,30 +6,60 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone, timedelta
 
+# ── 구매 의도 있는 키워드만 ──────────────────────────────
 KEYWORDS = [
-    "Rejuran Seoul", "Rejuran Korea", "Korean skincare clinic",
-    "GLP-1 Korea", "GLP-1 Seoul", "medical tourism Seoul",
-    "Ulthera Seoul", "Exosome Seoul", "Korean aesthetic clinic",
-    "Seoul dermatologist", "Mounjaro Korea", "Wegovy Korea", "PDRN Korea",
+    # 한국 방문 의도
+    "visiting Seoul clinic",
+    "trip to Korea skincare",
+    "flying to Korea treatment",
+    "worth flying to Seoul",
+    "planning Korea trip surgery",
+    "Seoul medical tourism",
+    "Korea trip dermatologist",
+    # 시술 + 서울/한국
+    "Rejuran where to get Seoul",
+    "Rejuran Korea trip",
+    "GLP-1 Korea trip",
+    "Mounjaro Korea visit",
+    "Wegovy Korea cheaper",
+    "Ulthera Seoul visit",
+    "Exosome Seoul clinic",
+    # 가격 비교
+    "cheaper in Korea",
+    "Korea vs US price treatment",
+    "medical tourism Korea worth it",
+    "how much does it cost in Korea",
 ]
 
+# ── 서브레딧 ────────────────────────────────────────────
 SUBREDDITS = [
-    "koreatravel", "Seoul", "skincareaddiction", "AsianBeauty",
-    "PlasticSurgery", "Semaglutide", "Ozempic", "WegovyWeightLoss",
-    "MedicalTourism", "koreanskincare", "KoreanBeauty",
+    "koreatravel",
+    "Seoul",
+    "PlasticSurgery",
+    "MedicalTourism",
+    "Semaglutide",
+    "Ozempic",
+    "WegovyWeightLoss",
+    "skincareaddiction",
+    "AsianBeauty",
+    "koreanskincare",
 ]
 
 def check_reddit_rss():
     found = []
     cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+    seen = set()
     for subreddit in SUBREDDITS:
         for keyword in KEYWORDS:
             url = f"https://www.reddit.com/r/{subreddit}/search.rss?q={keyword.replace(' ', '+')}&sort=new&restrict_sr=1"
             try:
                 feed = feedparser.parse(url)
                 for entry in feed.entries:
+                    if entry.link in seen:
+                        continue
                     published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
                     if published > cutoff:
+                        seen.add(entry.link)
                         found.append({
                             'subreddit': f"r/{subreddit}",
                             'keyword': keyword,
@@ -50,14 +81,14 @@ def send_email(found_items):
         return
 
     msg = MIMEMultipart('alternative')
-    msg['Subject'] = f"🔔 Telos Monitor - {len(found_items)}개 새 게시물 ({datetime.now().strftime('%m/%d %H:%M')})"
+    msg['Subject'] = f"🔔 Telos Monitor - {len(found_items)}개 한국방문 관심 게시물 ({datetime.now().strftime('%m/%d %H:%M')})"
     msg['From'] = gmail_user
     msg['To'] = notify_email
 
     html = f"""<html><body style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;">
 <div style="background:#0a1628;padding:24px;border-radius:8px 8px 0 0;">
   <h1 style="color:#c9a96e;margin:0;">🔔 Telos Monitor</h1>
-  <p style="color:#8899aa;margin:8px 0 0;">{datetime.now().strftime('%Y-%m-%d %H:%M')} · {len(found_items)}개 발견</p>
+  <p style="color:#8899aa;margin:8px 0 0;">{datetime.now().strftime('%Y-%m-%d %H:%M')} · {len(found_items)}개 발견 · 한국 방문 관심 게시물</p>
 </div>"""
 
     for item in found_items:
