@@ -1,7 +1,6 @@
 import feedparser
 import os
 import smtplib
-import json
 import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -41,10 +40,28 @@ SUBREDDITS = [
     "koreanskincare",
 ]
 
+MEDICAL_FILTER = [
+    "clinic", "doctor", "dermatologist", "treatment", "surgery",
+    "procedure", "injection", "skin", "filler", "botox", "laser",
+    "ulthera", "rejuran", "exosome", "onda", "thermage", "glp",
+    "semaglutide", "mounjaro", "wegovy", "ozempic", "weight loss",
+    "aesthetic", "plastic surgery", "rhinoplasty", "liposuction",
+    "medical", "hospital", "prescription", "skincare", "pdrn",
+    "facial", "peel", "acne", "scar", "wrinkle", "anti-aging",
+    "hair loss", "transplant", "concierge", "cost", "price", "cheap",
+]
+
+def is_medical_relevant(title, summary):
+    text = (title + " " + summary).lower()
+    return any(word in text for word in MEDICAL_FILTER)
+
 def check_reddit_rss():
     found = []
     cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
     seen = set()
+    total_found = 0
+    total_filtered = 0
+
     for subreddit in SUBREDDITS:
         for keyword in KEYWORDS:
             url = f"https://www.reddit.com/r/{subreddit}/search.rss?q={keyword.replace(' ', '+')}&sort=new&restrict_sr=1"
@@ -55,17 +72,26 @@ def check_reddit_rss():
                         continue
                     published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
                     if published > cutoff:
+                        total_found += 1
+                        title = entry.title
+                        summary = entry.summary[:300] if hasattr(entry, 'summary') else ''
+                        if not is_medical_relevant(title, summary):
+                            total_filtered += 1
+                            print(f"  ❌ 필터링: {title[:50]}")
+                            continue
                         seen.add(entry.link)
                         found.append({
                             'subreddit': f"r/{subreddit}",
                             'keyword': keyword,
-                            'title': entry.title,
+                            'title': title,
                             'link': entry.link,
                             'published': published.strftime('%Y-%m-%d %H:%M UTC'),
-                            'summary': entry.summary[:300] if hasattr(entry, 'summary') else '',
+                            'summary': summary,
                         })
             except Exception as e:
                 print(f"Error: r/{subreddit} '{keyword}': {e}")
+
+    print(f"총 발견: {total_found}개 / 필터링 제거: {total_filtered}개 / 최종: {len(found)}개")
     return found
 
 def send_slack(found_items):
@@ -76,25 +102,13 @@ def send_slack(found_items):
     for item in found_items:
         message = {
             "blocks": [
-                {
-                    "type": "header",
-                    "text": {"type": "plain_text", "text": f"🔔 새 게시물 — {item['subreddit']}"}
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {"type": "mrkdwn", "text": f"*키워드:*\n{item['keyword']}"},
-                        {"type": "mrkdwn", "text": f"*시간:*\n{item['published']}"}
-                    ]
-                },
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"*<{item['link']}|{item['title']}>*\n{item['summary'][:200]}..."}
-                },
-                {
-                    "type": "actions",
-                    "elements": [{"type": "button", "text": {"type": "plain_text", "text": "게시물 보기"}, "url": item['link'], "style": "primary"}]
-                },
+                {"type": "header", "text": {"type": "plain_text", "text": f"🔔 새 게시물 — {item['subreddit']}"}},
+                {"type": "section", "fields": [
+                    {"type": "mrkdwn", "text": f"*키워드:*\n{item['keyword']}"},
+                    {"type": "mrkdwn", "text": f"*시간:*\n{item['published']}"}
+                ]},
+                {"type": "section", "text": {"type": "mrkdwn", "text": f"*<{item['link']}|{item['title']}>*\n{item['summary'][:200]}..."}},
+                {"type": "actions", "elements": [{"type": "button", "text": {"type": "plain_text", "text": "게시물 보기 →"}, "url": item['link'], "style": "primary"}]},
                 {"type": "divider"}
             ]
         }
@@ -112,21 +126,55 @@ def send_email(found_items):
         print("이메일 설정 없음")
         return
     msg = MIMEMultipart('alternative')
-    msg['Subject'] = f"🔔 Telos Monitor - {len(found_items)}개 게시물 ({datetime.now().strftime('%m/%d %H:%M')})"
+    msg['Subject'] = f"🔔 Telos Monitor - {len(found_items)}개 관련 게시물 ({datetime.now().strftime('%m/%d %H:%M')})"
     msg['From'] = gmail_user
     msg['To'] = notify_email
-    html = f"""<html><body style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;">
-<div style="background:#0a1628;padding:24px;">
-  <h1 style="color:#c9a96e;margin:0;">🔔 Telos Monitor</h1>
-  <p style="color:#8899aa;">{datetime.now().strftime('%Y-%m-%d %H:%M')} · {len(found_items)}개 발견</p>
-</div>"""
+    html = f"""
+
+
+  
+🔔 Telos Monitor
+
+  
+
+{datetime.now().strftime('%Y-%m-%d %H:%M')} · {len(found_items)}개 발견
+
+
+
+"""
     for item in found_items:
-        html += f"""<div style="border:1px solid #e0e0e0;margin:16px 0;padding:16px;">
-  <p style="color:#888;">{item['subreddit']} · {item['keyword']}</p>
-  <h3><a href="{item['link']}">{item['title']}</a></h3>
-  <p>{item['summary'][:200]}...</p>
-</div>"""
-    html += "</body></html>"
+        html += f"""
+
+  
+
+    Reddit
+    {item['subreddit']} · {item['keyword']}
+  
+
+  
+
+    
+{item['title']}
+
+    
+
+{item['summary'][:250]}...
+
+
+    게시물 보기 →
+  
+
+
+"""
+    html += """
+
+  
+
+Telos Monitor · telos.beauty · 매 1시간 자동실행
+
+
+
+"""
     msg.attach(MIMEText(html, 'html'))
     try:
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
@@ -140,14 +188,13 @@ def send_email(found_items):
 def main():
     print(f"🔍 Telos Monitor - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     found = check_reddit_rss()
-    print(f"발견: {len(found)}개")
     if found:
         for item in found:
-            print(f"  - [{item['subreddit']}] {item['title'][:60]}...")
+            print(f"  ✅ [{item['subreddit']}] {item['title'][:60]}...")
         send_slack(found)
         send_email(found)
     else:
-        print("✅ 새 게시물 없음")
+        print("✅ 관련 게시물 없음")
 
 if __name__ == "__main__":
     main()
