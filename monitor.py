@@ -61,7 +61,6 @@ def check_reddit_rss():
     seen = set()
     total_found = 0
     total_filtered = 0
-
     for subreddit in SUBREDDITS:
         for keyword in KEYWORDS:
             url = f"https://www.reddit.com/r/{subreddit}/search.rss?q={keyword.replace(' ', '+')}&sort=new&restrict_sr=1"
@@ -90,7 +89,6 @@ def check_reddit_rss():
                         })
             except Exception as e:
                 print(f"Error: r/{subreddit} '{keyword}': {e}")
-
     print(f"총 발견: {total_found}개 / 필터링 제거: {total_filtered}개 / 최종: {len(found)}개")
     return found
 
@@ -144,6 +142,7 @@ def send_email(found_items):
 """
     for item in found_items:
         html += f"""
+
 
   
 
